@@ -1,0 +1,3 @@
+<launch>
+    <node  name = "controleur"  pkg = "bb8_control"  type = "controleur" output = "screen" />
+</launch>
