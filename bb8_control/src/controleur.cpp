@@ -1,7 +1,12 @@
 //--- LES FICHIERS EN-TETES ----
+#include "ros/duration.h"
+#include "ros/publisher.h"
 #include <csignal>
+#include <geometry_msgs/Twist.h>
 #include <math.h>
+#include <nav_msgs/Odometry.h>
 #include <ros/ros.h>
+#include <std_msgs/Float64.h>
 #include <std_msgs/String.h>
 #include <string>
 #include <tf/tf.h>
@@ -22,44 +27,138 @@ using namespace geometry_msgs;
 
 // LES VARIABLES GLOBALES
 int mode;
-
+double pos_x = 0.0, pos_y = 0.0, ang = 0.0;
+Publisher pub_cmd_av;
+geometry_msgs::Twist cmd_av;
+double start_x = 0.0, start_y = 0.0; // Position initiale
+bool is_initial = false; // Vérifie si la position initiale a été enregistrée
+bool moving_forward = true; // Direction du robot
+bool has_moved = false;
+bool stopped = false;
+bool direction_changed = false;
 
 // LES PROTOTYPES DE FONCTIONS
 void sigintHandler(int sig);
 float quaternionToAngleEuler(Quaternion q_angle);
 
-
 // LES FONCTIONS ET LES CALLBACKS
 void avancer(float lin_vel) {
-
+  cmd_av.linear.x = lin_vel;
+  cmd_av.linear.y = 0.0;
+  cmd_av.linear.z = 0.0;
 }
-
 void stop() {
-
+  cmd_av.linear.x = 0.0;
+  cmd_av.linear.y = 0.0;
+  cmd_av.linear.z = 0.0;
+  cmd_av.angular.x = 0.0;
+  cmd_av.angular.y = 0.0;
+  cmd_av.angular.z = 0.0;
+  pub_cmd_av.publish(cmd_av);
 }
 
-void pivoter(float ang_vel) {
+void pivoter(float ang_vel) { cmd_av.angular.z = ang_vel; }
 
-}
-
-void reculer(float lin_vel) { 
-
-}
+void reculer(float lin_vel) { cmd_av.linear.x = -lin_vel; }
 
 void drive(float lin_vel, float ang_vel) {
-
+  avancer(lin_vel);
+  pivoter(ang_vel);
 }
 
 void mouvement_rectangulaire() {
+  float long_duration = 3.0; // Temps pour parcourir la longueur
+  float larg_duration = 3.0; // Temps pour parcourir la largeur
+  float turn_duration = (M_PI / 2) / ANGULAR_SPEED; // Temps pour tourner de 90°
 
+  // Avancer sur la longueur
+  avancer(LINEAR_SPEED);
+  pub_cmd_av.publish(cmd_av);
+  ros::Duration(long_duration).sleep();
+  stop();
+
+  // Tourner de 90°
+  pivoter(ANGULAR_SPEED);
+  pub_cmd_av.publish(cmd_av);
+  ros::Duration(turn_duration).sleep();
+  stop();
+
+  // Avancer sur la largeur
+  avancer(LINEAR_SPEED);
+  pub_cmd_av.publish(cmd_av);
+  ros::Duration(larg_duration).sleep();
+  stop();
+
+  // Tourner de 90° à nouveau
+  pivoter(ANGULAR_SPEED);
+  pub_cmd_av.publish(cmd_av);
+  ros::Duration(turn_duration).sleep();
+  stop();
 }
 
 void mouvement_circulaire() {
-	
+  float linear_speed = 1.0;  // Vitesse linéaire
+  float angular_speed = 1.0; // Vitesse de rotation
+
+  if (!moving_forward) {
+    linear_speed = -linear_speed; // Reculer si nécessaire
+    angular_speed = -angular_speed;
+  }
+
+  // Publier la commande de mouvement
+  drive(linear_speed, angular_speed);
+  pub_cmd_av.publish(cmd_av);
 }
 
-void mouvement_avancer_reculer() {
-	
+void mouvement_avancer_reculer() {}
+
+void odomCallback(const nav_msgs::Odometry::ConstPtr &msg) {
+  pos_x = msg->pose.pose.position.x;
+  pos_y = msg->pose.pose.position.y;
+
+  Quaternion q_angle;
+  q_angle.x = msg->pose.pose.orientation.x;
+  q_angle.y = msg->pose.pose.orientation.y;
+  q_angle.z = msg->pose.pose.orientation.z;
+  q_angle.w = msg->pose.pose.orientation.w;
+  ang = quaternionToAngleEuler(q_angle);
+
+  // Enregistrer la position initiale une seule fois
+  if (!is_initial) {
+    start_x = pos_x;
+    start_y = pos_y;
+    is_initial = true;
+  }
+
+  // Vérifier si le robot s’est éloigné suffisamment pour activer la détection
+  double dist_to_start =
+      sqrt(pow(pos_x - start_x, 2) + pow(pos_y - start_y, 2));
+
+  if (dist_to_start > 0.5) {
+    has_moved = true; // Dès qu'il s'éloigne, on active la détection
+  }
+
+  // Si le robot est revenu proche de sa position de départ et qu'il a déjà
+  // bougé
+  if (has_moved && dist_to_start < 0.3) {
+    if (!stopped) { // Vérifier si l’arrêt n’a pas encore été déclenché
+      stop();
+      ROS_INFO("Robot revenu à la position initiale, arrêt.");
+      ros::Duration(2).sleep(); // Pause avant de repartir
+
+      // **Inverser la direction** et s’assurer que l’inversion est bien prise
+      // en compte
+      moving_forward = !moving_forward;
+      stopped = true;
+      direction_changed = true;
+    }
+  } else {
+    stopped = false;
+  }
+
+  ROS_INFO(
+      "Position : [X: %f, Y: %f] | Distance à l'origine : %f | Direction : %s",
+      pos_x, pos_y, dist_to_start, moving_forward ? "AVANT" : "ARRIÈRE");
 }
 
 // MAIN DE L'APPLICATION
@@ -69,18 +168,19 @@ int main(int argc, char **argv) {
 
   NodeHandle nh;
 
+  // Publisher pour envoyer des commandes de vitesse
+  pub_cmd_av = nh.advertise<geometry_msgs::Twist>("/cmd_vel", 10);
 
+  // Subscriber pour récupérer les données d'odométrie
+  Subscriber sub_odom = nh.subscribe("/odom", 10, odomCallback);
 
-  
   Duration(1).sleep();
   Rate loop_rate(FREQ_CONTROL);
 
   while (ok()) {
-	loop_rate.sleep();
-
-
-
-    spinOnce();
+    mouvement_circulaire();
+    spinOnce(); // Met à jour les callbacks (odométrie)
+    loop_rate.sleep();
   }
 
   return 0;
@@ -98,8 +198,7 @@ void sigintHandler(int sig) {
 // FONCTION DE CONVERSION QUATERNION => ANGLE D'EULER YAW (ROTATION Z)
 float quaternionToAngleEuler(Quaternion angle_quaternion) {
 
-float angle_Euler = tf::getYaw(angle_quaternion);
-  
-return angle_Euler;
+  float angle_Euler = tf::getYaw(angle_quaternion);
 
+  return angle_Euler;
 }
