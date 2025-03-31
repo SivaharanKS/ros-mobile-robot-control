@@ -1,0 +1,11 @@
+<launch>
+    <!-- Nœud configurateur avec paramètres -->
+	<param name="biais_roue_gauche_marche_avant" type="int" value="20" />
+        <param name="biais_roue_gauche_marche_arriere" type="int" value="-20" />
+        <param name="biais_roue_droite_marche_avant" type="int" value="-60" />
+        <param name="biais_roue_droite_marche_arriere" type="int" value="60" />        
+  
+    <node pkg="parallax_control" type="configurateur" name="configurateur" output="screen"/>
+	
+	<node  name = "controleur"  pkg = "parallax_control"  type = "controleur" output = "screen" />
+</launch>
