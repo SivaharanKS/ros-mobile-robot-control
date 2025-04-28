@@ -8,4 +8,5 @@
     <node pkg="parallax_control" type="configurateur" name="configurateur" output="screen"/>
 	
 	<node  name = "controleur"  pkg = "parallax_control"  type = "controleur" output = "screen" />
+	<node  name = "obstacle_detecteur"  pkg = "parallax_control"  type = "obstacles_detecteur" output = "screen" />
 </launch>
